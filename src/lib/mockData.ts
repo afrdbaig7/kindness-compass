@@ -80,32 +80,76 @@ export const samplePredictions: PredictionResult[] = [
   { text: 'That movie was so bad it made me want to scream', prediction: 'offensive', confidence: 0.72, probabilities: { hate: 0.05, offensive: 0.72, neutral: 0.23 } },
 ];
 
-// Simulate a prediction with delay
-export function mockPredict(text: string): Promise<PredictionResult> {
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+
+export interface TopWord {
+  word: string;
+  score: number;
+}
+
+export interface ApiPredictionResult extends PredictionResult {
+  top_words: TopWord[];
+}
+
+/** Call the FastAPI backend. Falls back to mock if the backend is unreachable. */
+export async function apiPredict(text: string): Promise<ApiPredictionResult> {
+  try {
+    const res = await fetch(`${API_BASE}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!res.ok) {
+      throw new Error(`API error: ${res.status}`);
+    }
+
+    const data = await res.json();
+    const confidence: Record<PredictionClass, number> = data.confidence;
+    const prediction = data.prediction as PredictionClass;
+    const maxConf = confidence[prediction] ?? 0;
+
+    return {
+      text,
+      prediction,
+      confidence: maxConf,
+      probabilities: {
+        hate: confidence['hate'] ?? 0,
+        offensive: confidence['offensive'] ?? 0,
+        neutral: confidence['neutral'] ?? 0,
+      },
+      top_words: data.top_words ?? [],
+    };
+  } catch (err) {
+    console.warn('[apiPredict] Backend unreachable, falling back to mock.', err);
+    return _mockPredict(text);
+  }
+}
+
+/** Kept as offline fallback — not exported for primary use. */
+async function _mockPredict(text: string): Promise<ApiPredictionResult> {
   return new Promise((resolve) => {
     setTimeout(() => {
       const lower = text.toLowerCase();
       const hateWords = ['hate', 'kill', 'die', 'destroy', 'worthless', 'should not exist'];
       const offensiveWords = ['stupid', 'idiot', 'dumb', 'shut up', 'annoying', 'ugly', 'trash', 'hell'];
-      
+
       let hateScore = 0.02;
       let offensiveScore = 0.05;
       let neutralScore = 0.93;
-      
+
       hateWords.forEach(w => { if (lower.includes(w)) { hateScore += 0.25; neutralScore -= 0.2; } });
       offensiveWords.forEach(w => { if (lower.includes(w)) { offensiveScore += 0.2; neutralScore -= 0.15; } });
-      
-      // Normalize
+
       const total = hateScore + offensiveScore + neutralScore;
-      hateScore /= total;
-      offensiveScore /= total;
-      neutralScore /= total;
-      
+      hateScore /= total; offensiveScore /= total; neutralScore /= total;
+
       let prediction: PredictionClass = 'neutral';
       let confidence = neutralScore;
       if (hateScore > offensiveScore && hateScore > neutralScore) { prediction = 'hate'; confidence = hateScore; }
       else if (offensiveScore > hateScore && offensiveScore > neutralScore) { prediction = 'offensive'; confidence = offensiveScore; }
-      
+
       resolve({
         text,
         prediction,
@@ -115,6 +159,7 @@ export function mockPredict(text: string): Promise<PredictionResult> {
           offensive: Math.round(offensiveScore * 100) / 100,
           neutral: Math.round(neutralScore * 100) / 100,
         },
+        top_words: [],
       });
     }, 800 + Math.random() * 700);
   });

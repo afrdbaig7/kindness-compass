@@ -1,0 +1,9 @@
+# Dataset and trained models are generated locally — do not commit
+backend/model/model.pkl
+backend/model/vectorizer.pkl
+backend/data/dataset.csv
+
+# Python cache
+backend/__pycache__/
+backend/pipeline/__pycache__/
+backend/model/__pycache__/

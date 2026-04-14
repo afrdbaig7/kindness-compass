@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Loader2, AlertTriangle, ShieldAlert, CheckCircle2 } from 'lucide-react';
-import { mockPredict, type PredictionResult, type PredictionClass } from '@/lib/mockData';
+import { Send, Loader2, AlertTriangle, ShieldAlert, CheckCircle2, Zap, WifiOff } from 'lucide-react';
+import { apiPredict, type ApiPredictionResult, type PredictionClass, type TopWord } from '@/lib/mockData';
 
 const classConfig: Record<PredictionClass, { label: string; icon: typeof AlertTriangle; bgClass: string; textClass: string; glowClass: string }> = {
   hate: { label: 'Hate Speech', icon: ShieldAlert, bgClass: 'bg-hate/10', textClass: 'text-hate', glowClass: 'glow-hate' },
@@ -12,13 +12,18 @@ const classConfig: Record<PredictionClass, { label: string; icon: typeof AlertTr
 export default function PredictionPanel() {
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<PredictionResult | null>(null);
+  const [result, setResult] = useState<ApiPredictionResult | null>(null);
+  const [usingFallback, setUsingFallback] = useState(false);
 
   const handleAnalyze = async () => {
     if (!text.trim()) return;
     setLoading(true);
     setResult(null);
-    const res = await mockPredict(text);
+    const before = Date.now();
+    const res = await apiPredict(text);
+    // If the response came back instantly with empty top_words and no latency → fallback
+    const elapsed = Date.now() - before;
+    setUsingFallback(res.top_words.length === 0 && elapsed < 200);
     setResult(res);
     setLoading(false);
   };
@@ -28,7 +33,7 @@ export default function PredictionPanel() {
       <div className="glass-card p-6 space-y-4">
         <div className="flex items-center gap-2 mb-2">
           <div className="pulse-dot" />
-          <span className="terminal-text text-sm">MODEL: BERT-fine-tuned | STATUS: READY</span>
+          <span className="terminal-text text-sm">MODEL: LR + TF-IDF | STATUS: READY</span>
         </div>
         <textarea
           value={text}
@@ -54,7 +59,7 @@ export default function PredictionPanel() {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.4, ease: 'easeOut' }}
           >
-            <ResultCard result={result} />
+            <ResultCard result={result} usingFallback={usingFallback} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -62,20 +67,34 @@ export default function PredictionPanel() {
   );
 }
 
-function ResultCard({ result }: { result: PredictionResult }) {
+function ResultCard({ result, usingFallback }: { result: ApiPredictionResult; usingFallback: boolean }) {
   const config = classConfig[result.prediction];
   const Icon = config.icon;
 
   return (
     <div className={`glass-card p-6 ${config.glowClass} space-y-5`}>
-      <div className="flex items-center gap-3">
-        <div className={`w-12 h-12 rounded-xl ${config.bgClass} flex items-center justify-center`}>
-          <Icon className={`w-6 h-6 ${config.textClass}`} />
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`w-12 h-12 rounded-xl ${config.bgClass} flex items-center justify-center`}>
+            <Icon className={`w-6 h-6 ${config.textClass}`} />
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Predicted Class</p>
+            <p className={`text-xl font-heading font-bold ${config.textClass}`}>{config.label}</p>
+          </div>
         </div>
-        <div>
-          <p className="text-sm text-muted-foreground">Predicted Class</p>
-          <p className={`text-xl font-heading font-bold ${config.textClass}`}>{config.label}</p>
-        </div>
+        {usingFallback ? (
+          <div className="flex items-center gap-1 text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded-full">
+            <WifiOff className="w-3 h-3" />
+            <span>Offline mock</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 text-xs text-primary bg-primary/10 px-2 py-1 rounded-full">
+            <Zap className="w-3 h-3" />
+            <span>Live model</span>
+          </div>
+        )}
       </div>
 
       {/* Confidence bar */}
@@ -103,13 +122,39 @@ function ResultCard({ result }: { result: PredictionResult }) {
       <div className="grid grid-cols-3 gap-3">
         {(['hate', 'offensive', 'neutral'] as const).map((cls) => (
           <div key={cls} className="bg-muted/50 rounded-lg p-3 text-center">
-            <p className="text-xs text-muted-foreground capitalize mb-1">{cls === 'hate' ? 'Hate Speech' : cls === 'offensive' ? 'Offensive' : 'Neutral'}</p>
+            <p className="text-xs text-muted-foreground capitalize mb-1">
+              {cls === 'hate' ? 'Hate Speech' : cls === 'offensive' ? 'Offensive' : 'Neutral'}
+            </p>
             <p className={`font-heading font-bold text-lg ${classConfig[cls].textClass}`}>
               {(result.probabilities[cls] * 100).toFixed(0)}%
             </p>
           </div>
         ))}
       </div>
+
+      {/* Top contributing words (explainability) */}
+      {result.top_words && result.top_words.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground uppercase tracking-wider font-heading">
+            Key Contributing Words
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {result.top_words.map((tw: TopWord, i: number) => (
+              <motion.span
+                key={tw.word}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: i * 0.05 }}
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-mono
+                  ${config.bgClass} ${config.textClass} border border-current/20`}
+              >
+                {tw.word}
+                <span className="opacity-60 text-[10px]">{(tw.score * 100).toFixed(0)}%</span>
+              </motion.span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
