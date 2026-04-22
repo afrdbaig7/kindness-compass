@@ -17,7 +17,7 @@ export default function Index() {
             <span className="text-xs font-heading text-primary">NLP-Powered Detection</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-heading font-bold text-foreground mb-3">
-            Hate Speech <span className="text-primary">&</span> Offensive Language Detection
+            HateScan<span className="text-primary">.io</span>
           </h1>
           <p className="text-muted-foreground max-w-xl mx-auto text-sm leading-relaxed">
             Analyze text using state-of-the-art NLP models trained on the Davidson et al. dataset. 
